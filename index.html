@@ -170,6 +170,7 @@
             </div>
             <div id="keyboard"></div>
         </div>
+        <script src="scripts/socket.io.js"></script>
         <script src="app/bower_components/tsw/dist/tsw.min.js"></script>
         <script src="scripts/synth.js"></script>
         <script src="app/bower_components/qwerty-hancock/dist/qwerty-hancock.min.js"></script>
@@ -180,6 +181,64 @@
                     '<h1>Sorry, your browser doesn\'t support the Web Audio API. ' +
                     'Try <a href="http://google.com/chrome">Chrome</a> instead!</h1>');
             }
+
+            /*********************
+            SOCKET.IO
+            ***********************/
+            var socket = io('http://localhost:8081/');
+
+            var currentNotes = [];
+
+            socket.on('message',function(data){
+                console.log('message',data);
+            });
+
+            socket.on('playnote', function(notes){
+                notes.forEach(function(note,i){
+                    if(!note) return;
+                    if(currentNotes[i] !== note){
+                        if(currentNotes[i]) stopNote(currentNotes[i]);
+                        currentNotes[i] = note;
+                        console.log('playnote',currentNotes);
+                        playNote(note);
+                    }  
+                });
+            });
+
+            socket.on('stopnote', function(note){
+                console.log('stopnote',note);
+                stopNote(note);
+            });
+
+            socket.on('settings',function(object){
+                console.log('settings',object);
+                updateSettings(object);
+            });
+
+            function setSetting(osc,param,name,value){
+                updateSettings({
+                    osc:osc,
+                    param:param,
+                    name:name,
+                    value:value
+                });
+            }
+
+            function playNote(note){
+                synth.playNote(note);
+                // messageReceived({
+                //     data: [144,note,true]
+                // });
+            }
+
+            function stopNote(note){
+                synth.stopNote(note);
+                // messageReceived({
+                //     data: [144,note,false]
+                // });
+            }
+
+            /******************************/
 
             var synth = new Synth({
                     context: tsw.context(),
@@ -202,42 +261,45 @@
 
             inputs = inputs.concat(selects);
 
-            var updateSettings = function () {
-                var osc = this.getAttribute('data-oscillator'),
-                    param = this.getAttribute('data-param');
+            var updateSettings = function (object) {
+                var object = object || {};
+                var osc = object.osc || this.getAttribute('data-oscillator'),
+                    param = object.param || this.getAttribute('data-param'),
+                    value = object.value || this.value,
+                    name = object.name || this.name;
 
                 switch (param) {
                     case 'range':
-                        synth.oscillators[osc][param] = this.value;
+                        synth.oscillators[osc][param] = value;
                         break;
                     case 'waveform':
-                        synth.oscillators[osc][param] = this.value;
+                        synth.oscillators[osc][param] = value;
                         break;
                     case 'detune':
-                        synth.oscillators[osc][param] = this.value;
+                        synth.oscillators[osc][param] = value;
                         synth.activeOscillators.forEach(function (oscillator) {
                             oscillator.detune.value = synth.oscillators[osc][param];
                         });
                         break;
                     case 'filter':
-                        switch (this.name) {
+                        switch (name) {
                             case 'filter-attack':
-                                synth.filterEnvelopeSettings.attack = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.attack = parseInt(value, 10);
                                 break;
                             case 'filter-decay':
-                                synth.filterEnvelopeSettings.decay = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.decay = parseInt(value, 10);
                                 break;
                             case 'filter-sustain':
-                                synth.filterEnvelopeSettings.sustain = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.sustain = parseInt(value, 10);
                                 break;
                             case 'filter-release':
-                                synth.filterEnvelopeSettings.release = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.release = parseInt(value, 10);
                                 break;
                             case 'cutoffFrequency':
-                                synth.filterEnvelopeSettings.startLevel = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.startLevel = parseInt(value, 10);
                                 break; 
                             case 'emphasis':
-                                synth.filterEnvelopeSettings.Q = parseInt(this.value, 10);
+                                synth.filterEnvelopeSettings.Q = parseInt(value, 10);
                                 break;
                             case 'contour':
                                 //synth.filter.node.Q.value = parseInt(this.filter.emphasis, 10);
@@ -247,30 +309,30 @@
                         };
                         break;
                     case 'volume-filter':
-                        synth.volumeEnvelopeSettings[this.name] = parseFloat(this.value, 10);
+                        synth.volumeEnvelopeSettings[name] = parseFloat(value, 10);
                         break;
                     case 'mixer':
-                        synth.mixer[osc].node.gain(this.value);
+                        synth.mixer[osc].node.gain(value);
                         break;
                     case 'lfo':
-                        switch (this.name) {
+                        switch (name) {
                             case 'lfo-waveType':
-                                synth.lfoSettings.waveType = this.value;
+                                synth.lfoSettings.waveType = value;
                                 break;
                             case 'lfo-frequency':
-                                synth.lfoSettings.frequency = this.value;
+                                synth.lfoSettings.frequency = value;
                                 break;
                             case 'lfo-depth':
-                                synth.lfoSettings.node.depth = this.value;
+                                synth.lfoSettings.node.depth = value;
                                 break;
                             default:
                                 break;
                         };
                     case 'volume':
-                        synth.masterVolume.gain(this.value);
+                        synth.masterVolume.gain(value);
                         break;
                     case 'noise':
-                        synth.noiseLevel.gain(this.value);
+                        synth.noiseLevel.gain(value);
                         break;
                     default:
                         break;
@@ -287,10 +349,12 @@
             
             keyboard.keyDown = function (note, frequency) {
                 synth.playNote(note);
+                socket.emit('playnote',note);
             };
 
             keyboard.keyUp = function (note, frequency) {
                 synth.stopNote(note);
+                socket.emit('stopnote',note);
             };
 
             var messageReceived = function (message) {
@@ -340,16 +404,6 @@
                 console.log('no midi support')
             });
 
-            // Analytics
-            var _gaq = _gaq || [];
-            _gaq.push(['_setAccount', 'UA-32368229-1']);
-            _gaq.push(['_trackPageview']);
-
-            (function() {
-                var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
-                ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
-                var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
-            })();
         </script>
     </body>
 </html>
